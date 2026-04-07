@@ -1,0 +1,142 @@
+name: email-openenv
+version: "1.0.0"
+description: >
+  An OpenEnv-compatible environment where an AI agent reads, classifies,
+  extracts information from, and replies to realistic emails.
+  Designed for benchmarking LLM-based email processing pipelines.
+
+author: OpenEnv Contributors
+license: MIT
+
+# ─── Environment Settings ────────────────────────────────────────────────────
+environment:
+  class: EmailEnvironment
+  module: environment
+  total_emails: 10
+  shuffle: false
+  max_reward_per_email: 4.0
+  max_total_reward: 40.0
+
+# ─── Tasks ──────────────────────────────────────────────────────────────────
+tasks:
+  - id: email_classification
+    name: Email Classification
+    description: >
+      Classify the email into one of four categories:
+      Work, Personal, Spam, or Urgent.
+    reward_weight: 1.0
+    output_field: category
+    valid_values: [Work, Personal, Spam, Urgent]
+
+  - id: information_extraction
+    name: Information Extraction
+    description: >
+      Extract structured entities from the email body:
+      sender name, relevant date, deadline, main request,
+      organization, and contact information.
+    reward_weight: 1.0
+    output_field: extracted_entities
+    fields:
+      - name
+      - date
+      - deadline
+      - request
+      - organization
+      - contact
+
+  - id: reply_generation
+    name: Professional Reply Generation
+    description: >
+      Generate a professional, contextually appropriate email reply.
+      For spam, generate a warning/decline message.
+      For urgent emails, acknowledge urgency explicitly.
+    reward_weight: 1.0
+    output_field: reply
+    min_length: 80
+    tone: professional
+
+  - id: priority_detection
+    name: Priority Detection
+    description: >
+      Assign a priority level to the email:
+      Low, Medium, High, or Critical.
+    reward_weight: 1.0
+    output_field: priority
+    valid_values: [Low, Medium, High, Critical]
+
+# ─── Input Schema ────────────────────────────────────────────────────────────
+input_schema:
+  type: object
+  fields:
+    id: integer
+    sender: string
+    sender_email: string
+    subject: string
+    body: string
+    timestamp: string
+
+# ─── Action Schema ───────────────────────────────────────────────────────────
+action_schema:
+  type: object
+  required: [email_id, category, priority, extracted_entities, reply]
+  fields:
+    email_id: integer
+    category:
+      type: string
+      enum: [Work, Personal, Spam, Urgent]
+    priority:
+      type: string
+      enum: [Low, Medium, High, Critical]
+    extracted_entities:
+      type: object
+      fields:
+        name: string|null
+        date: string|null
+        deadline: string|null
+        request: string|null
+        organization: string|null
+        contact: string|null
+    reply: string
+    reasoning: string|null
+
+# ─── Observation Schema ──────────────────────────────────────────────────────
+observation_schema:
+  type: object
+  fields:
+    current_email: object
+    step_number: integer
+    total_emails: integer
+    completed_ids: array
+    task_complete: boolean
+
+# ─── Grader ─────────────────────────────────────────────────────────────────
+grader:
+  class: Grader
+  module: grader
+  method: rule_based
+  scores:
+    classification_score: "exact match against ground truth label"
+    extraction_score: "entity coverage ratio"
+    reply_score: "length + tone keyword matching + urgency handling"
+    priority_score: "proximity scoring (exact=1.0, adjacent=0.5, far=0.0)"
+
+# ─── Baseline Agent ──────────────────────────────────────────────────────────
+baseline:
+  class: BaselineAgent
+  module: baseline
+  model: gpt-4o-mini
+  temperature: 0.2
+
+# ─── Evaluation Metrics ──────────────────────────────────────────────────────
+metrics:
+  - total_reward
+  - classification_accuracy
+  - extraction_f1
+  - reply_quality_avg
+  - priority_accuracy
+
+# ─── UI ─────────────────────────────────────────────────────────────────────
+ui:
+  framework: gradio
+  entrypoint: app.py
+  port: 7860
