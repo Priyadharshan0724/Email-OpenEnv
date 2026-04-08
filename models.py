@@ -1,95 +1,152 @@
 """
-models.py - Pydantic data schemas for Email-OpenEnv
-Defines all structured data types used across the system.
+Pydantic models for Email-OpenEnv environment
+Defines schemas for email data, actions, and states
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, List, Literal
+from typing import Optional, List, Dict, Any
 from enum import Enum
 
 
-# ─── Enums ────────────────────────────────────────────────────────────────────
-
-class EmailCategory(str, Enum):
-    WORK = "Work"
-    PERSONAL = "Personal"
-    SPAM = "Spam"
-    URGENT = "Urgent"
-
-
-class PriorityLevel(str, Enum):
-    LOW = "Low"
-    MEDIUM = "Medium"
-    HIGH = "High"
-    CRITICAL = "Critical"
+class EmailCategoryEnum(str, Enum):
+    """Email classification categories"""
+    WORK = "work"
+    PERSONAL = "personal"
+    SPAM = "spam"
+    URGENT = "urgent"
 
 
-# ─── Core Email Schema ─────────────────────────────────────────────────────────
+class UrgencyLevelEnum(str, Enum):
+    """Urgency levels for emails"""
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
+
 
 class Email(BaseModel):
-    """Represents a raw incoming email."""
-    id: int
-    sender: str
-    sender_email: str
-    subject: str
-    body: str
-    timestamp: str
-
+    """Email data model"""
+    id: str = Field(..., description="Unique email identifier")
+    sender: str = Field(..., description="Email sender address")
+    sender_name: str = Field(..., description="Sender's name")
+    subject: str = Field(..., description="Email subject")
+    content: str = Field(..., description="Email body content")
+    timestamp: str = Field(..., description="Email received timestamp")
+    
     class Config:
-        use_enum_values = True
+        json_schema_extra = {
+            "example": {
+                "id": "email_001",
+                "sender": "john.doe@company.com",
+                "sender_name": "John Doe",
+                "subject": "Project Update",
+                "content": "Hi, please review the attached project proposal...",
+                "timestamp": "2026-04-08T10:30:00"
+            }
+        }
 
 
-# ─── Agent Action Schema ───────────────────────────────────────────────────────
+class EmailState(BaseModel):
+    """State representation of an email for the agent"""
+    email_id: str
+    sender: str
+    sender_name: str
+    subject: str
+    content: str
+    timestamp: str
+    extracted_entities: Optional[Dict[str, Any]] = None
+    urgency_level: Optional[UrgencyLevelEnum] = None
+    category: Optional[EmailCategoryEnum] = None
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "email_id": "email_001",
+                "sender": "john.doe@company.com",
+                "sender_name": "John Doe",
+                "subject": "Project Update",
+                "content": "Hi, please review the attached project proposal...",
+                "timestamp": "2026-04-08T10:30:00",
+                "extracted_entities": {
+                    "names": ["John Doe"],
+                    "dates": ["2026-04-15"],
+                    "requests": ["review project proposal"]
+                },
+                "urgency_level": "high",
+                "category": "work"
+            }
+        }
 
-class ExtractedEntities(BaseModel):
-    """Information extracted from the email body."""
-    name: Optional[str] = None
-    date: Optional[str] = None
+
+class ClassificationAction(BaseModel):
+    """Action: Classify email"""
+    action_type: str = "classify"
+    category: EmailCategoryEnum
+    confidence: float = Field(..., ge=0.0, le=1.0)
+
+
+class ExtractionAction(BaseModel):
+    """Action: Extract information from email"""
+    action_type: str = "extract"
+    sender_name: str
+    requested_date: Optional[str] = None
+    key_request: str
     deadline: Optional[str] = None
-    request: Optional[str] = None
-    organization: Optional[str] = None
-    contact: Optional[str] = None
+    entities: Dict[str, Any]
 
 
-class AgentAction(BaseModel):
-    """
-    The complete structured action submitted by the AI agent.
-    Contains classification, extraction, priority, and reply.
-    """
-    email_id: int
-    category: EmailCategory
-    priority: PriorityLevel
-    extracted_entities: ExtractedEntities
-    reply: str
-    reasoning: Optional[str] = None  # optional chain-of-thought
+class ReplyGenerationAction(BaseModel):
+    """Action: Generate email reply"""
+    action_type: str = "generate_reply"
+    reply_subject: str
+    reply_content: str
+    sender_email: str
 
 
-# ─── Environment State Schema ──────────────────────────────────────────────────
-
-class EnvironmentState(BaseModel):
-    """Current observable state of the environment."""
-    current_email: Email
-    step_number: int
-    total_emails: int
-    completed_ids: List[int] = Field(default_factory=list)
-    task_complete: bool = False
+class PriorityAction(BaseModel):
+    """Action: Mark email priority"""
+    action_type: str = "prioritize"
+    urgency_level: UrgencyLevelEnum
+    reason: str
 
 
-# ─── Step Result Schema ────────────────────────────────────────────────────────
-
-class GraderResult(BaseModel):
-    """Detailed scoring breakdown from the grader."""
-    classification_score: float   # 0.0 - 1.0
-    extraction_score: float       # 0.0 - 1.0
-    reply_score: float            # 0.0 - 1.0
-    priority_score: float         # 0.0 - 1.0
-    total_reward: float           # 0.0 - 4.0 (sum)
-    feedback: str                 # human-readable explanation
+class ActionUnion(BaseModel):
+    """Union of all possible actions"""
+    classification: Optional[ClassificationAction] = None
+    extraction: Optional[ExtractionAction] = None
+    reply: Optional[ReplyGenerationAction] = None
+    priority: Optional[PriorityAction] = None
 
 
 class StepResult(BaseModel):
-    """Result returned after the agent takes a step."""
-    observation: EnvironmentState
-    reward: float
-    done: bool
-    info: GraderResult
+    """Result of a step in the environment"""
+    success: bool
+    reward: float = Field(..., ge=-1.0, le=1.0)
+    message: str
+    state: Optional[EmailState] = None
+    scores: Dict[str, float] = Field(default_factory=dict)
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "success": True,
+                "reward": 0.85,
+                "message": "Email processed successfully",
+                "state": {
+                    "email_id": "email_001",
+                    "sender": "john.doe@company.com",
+                    "sender_name": "John Doe",
+                    "subject": "Project Update",
+                    "content": "Hi, please review...",
+                    "timestamp": "2026-04-08T10:30:00",
+                    "category": "work",
+                    "urgency_level": "high"
+                },
+                "scores": {
+                    "classification_accuracy": 1.0,
+                    "extraction_correctness": 0.8,
+                    "reply_quality": 0.85
+                }
+            }
+        }
+}
